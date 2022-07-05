@@ -1,0 +1,67 @@
+image:
+  name: hashicorp/terraform:light
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+# Default output file for Terraform plann
+variables:
+  PLAN: plan.tfplan
+  JSON_PLAN_FILE: tfplan.json
+  TF_IN_AUTOMATION: "true"
+  GITLAB_TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
+
+cache:
+  key: "$CI_COMMIT_SHA"
+  paths:
+    - .terraform
+
+before_script:
+  - apk add --update curl jq
+  - alias convert_report="jq -r '([.resource_changes[].change.actions?]|flatten)|{\"create\":(map(select(.==\"create\"))|length),\"update\":(map(select(.==\"update\"))|length),\"delete\":(map(select(.==\"delete\"))|length)}'"
+  - terraform --version
+  - terraform init -reconfigure -backend-config="address=${GITLAB_TF_ADDRESS}" -backend-config="lock_address=${GITLAB_TF_ADDRESS}/lock" -backend-config="unlock_address=${GITLAB_TF_ADDRESS}/lock" -backend-config="username=gitlab-ci-token" -backend-config="password=${CI_JOB_TOKEN}" -backend-config="lock_method=POST" -backend-config="unlock_method=DELETE" -backend-config="retry_wait_min=5"
+
+stages:
+  - validate
+  - plan
+  - apply
+  - destroy
+
+validate:
+  stage: validate
+  script:
+    - terraform validate
+    - terraform fmt -check=true
+  only:
+    - branches
+
+merge review:
+  stage: plan
+  script:
+    - terraform plan -out=$PLAN
+    - "terraform show --json $PLAN | convert_report > $JSON_PLAN_FILE"
+  artifacts:
+    name: plan
+    reports:
+        terraform: $JSON_PLAN_FILE
+  only:
+    - merge_requests
+
+plan production:
+  stage: plan
+  script:
+    - terraform plan
+  only:
+    - main
+  resource_group: production
+
+apply:
+  stage: apply
+  script:
+    - terraform apply -auto-approve
+  dependencies:
+    - plan production
+  only:
+    - main
+  resource_group: production
