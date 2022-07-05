@@ -1,0 +1,17 @@
+stages:
+  - build
+  - test
+  - staging
+compile:
+  stage: build
+  script: 
+    - mvn -X -gs settings.xml compile -DskipTests
+sonarqube:
+  stage: test
+  script: 
+    - mvn -gs settings.xml clean verify sonar:sonar -Dsonar.projectKey=apiproducer -Dsonar.host.url=https://sonar-afpson-sonars.pro.ap.intra.cloud.lac.es/ -Dsonar.java.source=1.8 -Dhttps.proxyHost=proxyserv.sv.lac.es -Dhttps.proxyPort=8080 -Dsonar.login=$SONARLOGIN
+artifactory:
+  stage: staging
+  script:
+    - mvn -gs settings.xml package -DskipTests 
+    - curl -v -k -x 'proxyserv.s.la.es:8080'  -u $ARTUSER:$ARTPASS -X PUT "https://a.cd.ck.com/artifactory/arq-cloud-generic-artifacts/SpringMS/apiproducer.jar" -T target/*.jar
